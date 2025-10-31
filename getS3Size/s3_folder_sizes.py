@@ -42,10 +42,10 @@ if __name__ == '__main__':
     bucket, prefix = parse_bucket_and_prefix(sys.argv[1])
 
     # Validación opcional
-    BUCKET_REGEX = r'^[a-z0-9.\-_]{3,63}$'
-    if not re.match(BUCKET_REGEX, bucket):
-        print(f"❌ Bucket name '{bucket}' is invalid.")
-        sys.exit(1)
+    #BUCKET_REGEX = r'^[a-z0-9.\-_]{3,63}$'
+    #if not re.match(BUCKET_REGEX, bucket):
+    #    print(f"❌ Bucket name '{bucket}' is invalid.")
+    #    sys.exit(1)
 
     print(f"🔍 Analizando bucket '{bucket}' con prefijo '{prefix}'...")
 
