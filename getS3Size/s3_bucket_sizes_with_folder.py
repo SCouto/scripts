@@ -23,16 +23,16 @@ def get_all_bucket_names() -> List[str]:
             bucket_name = bucket['Name'].lower()
 
             # Skip buckets with 'lifecycle' in name
-            if 'lifecycle' in bucket_name:
-                continue
+            #if 'lifecycle' in bucket_name:
+            #    continue
 
             # Skip buckets with 'logs' in name
-            if 'logs' in bucket_name:
-                continue
+            #if 'logs' in bucket_name:
+            #    continue
 
             # Skip buckets that match 'db-XX' pattern (where XX is any characters)
-            if re.match(r'.*db-.*', bucket_name):
-                continue
+            #if re.match(r'.*db-.*', bucket_name):
+            #    continue
 
             filtered_buckets.append(bucket['Name'])
 
@@ -41,40 +41,74 @@ def get_all_bucket_names() -> List[str]:
         print(f"❌ Error listando buckets: {e}")
         return []
 
-def get_bucket_size_enumeration(bucket_name: str) -> Tuple[str, int]:
+def get_folder_size_s3(bucket_name: str, folder_path: str) -> Tuple[str, int, int, dict]:
     """
-    Obtiene el tamaño de un bucket enumerando todos los objetos.
-    Esto es más lento pero más preciso y actualizado en tiempo real.
+    Calcula el tamaño de una carpeta específica en un bucket S3 y agrupa por subcarspetas.
 
     :param bucket_name: Nombre del bucket
-    :return: Tuple (bucket_name, size_in_bytes)
+    :param folder_path: Ruta de la carpeta (ej: "data-realestate-lifecycle-pro/user_model")
+    :return: Tuple (folder_path, size_in_bytes, object_count, subfolder_sizes)
     """
     try:
         s3 = boto3.client('s3')
 
+        # Asegurar que el path termine con / si es una carpeta
+        if folder_path and not folder_path.endswith('/'):
+            folder_path += '/'
+
         total_size = 0
         object_count = 0
+        subfolder_sizes = {}  # Diccionario para almacenar tamaños por subcarpeta
 
         # Usar paginador para manejar respuestas grandes
         paginator = s3.get_paginator('list_objects_v2')
 
         # Configurar parámetros de la consulta
         params = {
-            'Bucket': bucket_name
+            'Bucket': bucket_name,
+            'Prefix': folder_path
         }
+
+        print(f"🔍 Analizando objetos en: s3://{bucket_name}/{folder_path}")
 
         # Iterar a través de todas las páginas
         for page in paginator.paginate(**params):
             if 'Contents' in page:
                 for obj in page['Contents']:
-                    total_size += obj['Size']
+                    obj_key = obj['Key']
+                    obj_size = obj['Size']
+
+                    total_size += obj_size
                     object_count += 1
 
-        return bucket_name, total_size
+                    # Determinar la subcarpeta inmediata
+                    # Remover el prefijo de la carpeta base
+                    relative_path = obj_key[len(folder_path):]
+
+                    if '/' in relative_path:
+                        # Es un archivo dentro de una subcarpeta
+                        subfolder = relative_path.split('/')[0]
+                        subfolder_key = f"{folder_path}{subfolder}/"
+                    else:
+                        # Es un archivo directamente en la carpeta base
+                        subfolder_key = folder_path + "(archivos directos)"
+
+                    # Agregar al diccionario de subcarpetas
+                    if subfolder_key not in subfolder_sizes:
+                        subfolder_sizes[subfolder_key] = {'size': 0, 'count': 0}
+
+                    subfolder_sizes[subfolder_key]['size'] += obj_size
+                    subfolder_sizes[subfolder_key]['count'] += 1
+
+                    # Mostrar progreso cada 1000 objetos
+                    if object_count % 1000 == 0:
+                        print(f"  📊 Procesados {object_count} objetos, tamaño acumulado: {format_size(total_size)}")
+
+        return folder_path, total_size, object_count, subfolder_sizes
 
     except Exception as e:
-        print(f"❌ Error enumerando objetos para '{bucket_name}': {e}")
-        return bucket_name, 0
+        print(f"❌ Error calculando tamaño de carpeta '{folder_path}' en bucket '{bucket_name}': {e}")
+        return folder_path, 0, 0, {}
 
 def get_bucket_size_cloudwatch(bucket_name: str) -> Tuple[str, int]:
     """
@@ -158,12 +192,9 @@ def process_bucket_with_progress(args):
     """
     Procesa un bucket y muestra progreso thread-safe.
     """
-    bucket_name, bucket_index, total_buckets, lock, use_accurate = args
+    bucket_name, bucket_index, total_buckets, lock = args
 
-    if use_accurate:
-        name, size = get_bucket_size_enumeration(bucket_name)
-    else:
-        name, size = get_bucket_size_cloudwatch(bucket_name)
+    name, size = get_bucket_size_cloudwatch(bucket_name)
 
     with lock:
         print(f"  [{bucket_index}/{total_buckets}] {bucket_name}: {format_size(size)}")
@@ -190,40 +221,54 @@ def format_size(size_bytes: int) -> str:
     else:
         return f"{size:.2f} {units[unit_index]}"
 
+def parse_folder_path(folder_arg: str) -> Tuple[str, str]:
+    """
+    Parsea el argumento de carpeta para extraer bucket y path.
+    Formatos soportados:
+    - bucket-name/folder/path
+    - s3://bucket-name/folder/path
+    """
+    if folder_arg.startswith('s3://'):
+        # Remover prefijo s3://
+        folder_arg = folder_arg[5:]
+
+    # Dividir en bucket y path
+    parts = folder_arg.split('/', 1)
+    if len(parts) == 1:
+        # Solo bucket, sin carpeta específica
+        return parts[0], ""
+    else:
+        return parts[0], parts[1]
+
 def main():
     parser = argparse.ArgumentParser(
-        description='🚀 S3 Bucket Size Analyzer - Fast CloudWatch or Accurate Object Enumeration',
+        description='🚀 S3 Bucket Size Analyzer - Analiza buckets completos o carpetas específicas',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog='''
 Ejemplos de uso:
-  %(prog)s                    # Usar CloudWatch (rápido, datos de 24-48h)
-  %(prog)s --accurate         # Usar enumeración de objetos (lento, datos actuales)
+  %(prog)s                                    # Analizar todos los buckets
+  %(prog)s --folder bucket-name/folder/path   # Analizar carpeta específica
+  %(prog)s --folder s3://bucket-name/folder   # Usar formato S3 URI
+  %(prog)s --folder data-realestate-lifecycle-pro/user_model  # Tu ejemplo
         '''
     )
 
     parser.add_argument(
-        '--accurate',
-        action='store_true',
-        help='Usar enumeración de objetos para datos precisos y actuales (más lento)'
+        '--folder',
+        type=str,
+        help='Ruta específica de carpeta a analizar (formato: bucket-name/folder/path o s3://bucket-name/folder/path)'
+    )
+
+    parser.add_argument(
+        '--max-subfolders',
+        type=int,
+        default=50,
+        help='Número máximo de subcarpetas a mostrar en el desglose (por defecto: 50)'
     )
 
     args = parser.parse_args()
 
-    # Determinar el método y título
-    if args.accurate:
-        method_title = "Object Enumeration - ACCURATE!"
-        method_description = "enumerando objetos (paralelo)"
-        method_note = "Los tamaños son actuales y precisos, pero puede tomar más tiempo"
-        completion_msg = "enumeración de objetos"
-        data_note = "Los datos son actuales y precisos"
-    else:
-        method_title = "CloudWatch Version - FAST!"
-        method_description = "usando CloudWatch (paralelo)"
-        method_note = "Los tamaños se actualizan diariamente en CloudWatch"
-        completion_msg = "CloudWatch metrics"
-        data_note = "Los datos son de las últimas 24-48 horas"
-
-    print(f"🚀 S3 Bucket Size Analyzer ({method_title})")
+    print("🚀 S3 Bucket Size Analyzer")
     print("=" * 70)
 
     # Verificar credenciales AWS
@@ -238,6 +283,82 @@ Ejemplos de uso:
         print("  • Perfil IAM en EC2")
         sys.exit(1)
 
+    # Modo carpeta específica
+    if args.folder:
+        print(f"\n📁 Modo: Análisis de carpeta específica")
+        bucket_name, folder_path = parse_folder_path(args.folder)
+
+        print(f"🎯 Bucket: {bucket_name}")
+        print(f"📂 Carpeta: {folder_path if folder_path else '(raíz)'}")
+        print("\n🔍 Calculando tamaño de carpeta...")
+        print("⚠️  Nota: Este método enumera todos los objetos y puede tardar en carpetas grandes")
+
+        folder_path_result, total_size, object_count, subfolder_sizes = get_folder_size_s3(bucket_name, folder_path)
+
+        print("\n" + "="*70)
+        print("📊 RESULTADO DEL ANÁLISIS DE CARPETA")
+        print("="*70)
+        print(f"📦 Bucket: {bucket_name}")
+        print(f"📁 Carpeta: {folder_path if folder_path else '(raíz)'}")
+        print(f"📏 Tamaño total: {format_size(total_size)}")
+        print(f"🔢 Número de objetos: {object_count:,}")
+        if object_count > 0:
+            avg_size = total_size / object_count
+            print(f"📊 Tamaño promedio por objeto: {format_size(int(avg_size))}")
+
+        # Mostrar desglose por subcarpetas si hay datos
+        if subfolder_sizes:
+            print("\n" + "-"*70)
+            print("📂 DESGLOSE POR SUBCARPETAS:")
+            print("-"*70)
+
+            # Ordenar subcarpetas por tamaño (mayor a menor)
+            sorted_subfolders = sorted(
+                subfolder_sizes.items(),
+                key=lambda x: x[1]['size'],
+                reverse=True
+            )
+
+            # Mostrar solo las N subcarpetas más grandes según el límite
+            displayed_count = 0
+            remaining_size = 0
+            remaining_count = 0
+
+            for subfolder_path, data in sorted_subfolders:
+                if displayed_count < args.max_subfolders:
+                    size = data['size']
+                    count = data['count']
+                    percentage = (size / total_size * 100) if total_size > 0 else 0
+
+                    # Formatear el nombre de la subcarpeta para mostrar
+                    display_name = subfolder_path
+                    if display_name.startswith(folder_path):
+                        display_name = display_name[len(folder_path):]
+                    if display_name.endswith('/'):
+                        display_name = display_name[:-1]
+                    if not display_name:
+                        display_name = "(archivos directos)"
+
+                    print(f"  📁 {display_name:<40} : {format_size(size):>12} ({percentage:5.1f}%) - {count:,} objetos")
+                    displayed_count += 1
+                else:
+                    # Acumular las subcarpetas restantes
+                    remaining_size += data['size']
+                    remaining_count += data['count']
+
+            # Mostrar resumen de subcarpetas restantes si las hay
+            if remaining_size > 0:
+                remaining_folders = len(sorted_subfolders) - args.max_subfolders
+                percentage = (remaining_size / total_size * 100) if total_size > 0 else 0
+                print(f"  📁 {f'... y {remaining_folders} subcarpetas más':<40} : {format_size(remaining_size):>12} ({percentage:5.1f}%) - {remaining_count:,} objetos")
+
+        print("="*70)
+
+        return
+
+    # Modo análisis completo de buckets (funcionalidad original)
+    print(f"\n📦 Modo: Análisis completo de buckets")
+
     # Obtener lista de buckets
     print("\n🔍 Obteniendo lista de buckets...")
     bucket_names = get_all_bucket_names()
@@ -247,8 +368,8 @@ Ejemplos de uso:
         return
 
     print(f"📦 Encontrados {len(bucket_names)} bucket(s)")
-    print(f"\n📊 Calculando tamaños {method_description}...")
-    print(f"ℹ️  Nota: {method_note}")
+    print("\n📊 Calculando tamaños usando CloudWatch (paralelo)...")
+    print("ℹ️  Nota: Los tamaños se actualizan diariamente en CloudWatch")
 
     # Procesar buckets en paralelo
     bucket_sizes = []
@@ -256,7 +377,7 @@ Ejemplos de uso:
 
     # Preparar argumentos para el procesamiento paralelo
     args_list = [
-        (bucket_name, i + 1, len(bucket_names), lock, args.accurate)
+        (bucket_name, i + 1, len(bucket_names), lock)
         for i, bucket_name in enumerate(bucket_names)
     ]
 
@@ -294,8 +415,8 @@ Ejemplos de uso:
 
     print("-" * 70)
     print(f"🎯 TOTAL: {format_size(total_size)}")
-    print(f"\n⚡ Procesamiento completado usando {completion_msg}!")
-    print(f"ℹ️  {data_note}")
+    print(f"\n⚡ Procesamiento completado usando CloudWatch metrics!")
+    print("ℹ️  Los datos son de las últimas 24-48 horas")
 
 if __name__ == '__main__':
     main()
