@@ -30,10 +30,6 @@ def get_all_bucket_names() -> List[str]:
             if 'logs' in bucket_name:
                 continue
 
-            # Skip buckets that match 'db-XX' pattern (where XX is any characters)
-            if re.match(r'.*db-.*', bucket_name):
-                continue
-
             filtered_buckets.append(bucket['Name'])
 
         return filtered_buckets
