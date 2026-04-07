@@ -227,10 +227,10 @@ def open_iterm_split_pane(instance_id, instance_name, aws_profile=None):
     Open iTerm split pane (horizontally - stacked) and connect using AWS SSM.
     instance_id: EC2 instance ID
     instance_name: EC2 instance name
-    aws_profile: AWS profile name (defaults to 'motor-dev' if None)
+    aws_profile: AWS profile name (defaults to 'dev' if None)
     """
-    # Default profile to motor-dev if not provided
-    profile = aws_profile if aws_profile else 'motor-dev'
+    # Default profile to dev if not provided
+    profile = aws_profile if aws_profile else 'dev'
 
     # Build AWS SSM command with profile flag
     ssm_command = f"aws ssm start-session --profile {profile} --target {instance_id}"
@@ -293,14 +293,14 @@ def connect_to_instances(instance_ids, instances, aws_profile=None):
     Connect to instances.
     Single instance: connect in current pane.
     Multiple instances: create horizontal splits (stacked vertically).
-    aws_profile: AWS profile name (defaults to 'motor-dev' if None)
+    aws_profile: AWS profile name (defaults to 'dev' if None)
     """
     if not instance_ids:
         print("\nNo instances selected. Exiting.")
         return
 
-    # Use motor-dev as default profile if none provided
-    profile = aws_profile if aws_profile else 'motor-dev'
+    # Use dev as default profile if none provided
+    profile = aws_profile if aws_profile else 'dev'
 
     # Create a mapping of instance IDs to names
     id_to_name = {inst['id']: inst['name'] for inst in instances}
@@ -341,15 +341,15 @@ def main():
     parser.add_argument(
         '--profile',
         type=str,
-        help='AWS profile name to use for authentication (default: motor-dev)',
+        help='AWS profile name to use for authentication (default: dev)',
         default=None
     )
     args = parser.parse_args()
 
     print("EC2 Instance Manager - Airflow Instances\n")
 
-    # Use motor-dev as default profile if none provided
-    profile = args.profile if args.profile else 'motor-dev'
+    # Use dev as default profile if none provided
+    profile = args.profile if args.profile else 'dev'
 
     # Ensure AWS SSO login
     aws_sso_login(profile)
