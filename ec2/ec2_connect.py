@@ -18,7 +18,8 @@ TARGET_NAMES = [
     "airflow-scheduler",
     "airflow-worker",
     "airflow-triggerer",
-    "airflow-webserver"
+    "airflow-webserver",
+    "airflow-dag_processor"
 ]
 
 
@@ -54,7 +55,8 @@ def sort_instances_by_type(instances):
         'worker': 1,
         'scheduler': 2,
         'triggerer': 3,
-        'webserver': 4
+        'webserver': 4,
+        'dag_processor': 5
     }
 
     def get_sort_key(inst):
@@ -147,6 +149,7 @@ def display_instance_menu(instances):
     schedulers = [i for i in sorted_instances if 'scheduler' in i['name']]
     triggerers = [i for i in sorted_instances if 'triggerer' in i['name']]
     webservers = [i for i in sorted_instances if 'webserver' in i['name']]
+    dag_processors = [i for i in sorted_instances if 'dag_processor' in i['name']]
 
     # Build choices with quick-select options
     choices = []
@@ -158,6 +161,8 @@ def display_instance_menu(instances):
         choices.append('[All Triggerers]')
     if webservers:
         choices.append('[All Webservers]')
+    if dag_processors:
+        choices.append('[All Dag Processors]')
 
     # Add individual instances (already sorted)
     for inst in sorted_instances:
@@ -206,6 +211,8 @@ def display_instance_menu(instances):
             instance_ids.extend([i['id'] for i in triggerers])
         elif item == '[All Webservers]':
             instance_ids.extend([i['id'] for i in webservers])
+        elif item == '[All Dag Processors]':
+            instance_ids.extend([i['id'] for i in dag_processors])
         elif item != '---':
             # Extract instance ID from format: "name (id)"
             instance_id = item.split('(')[1].split(')')[0]
