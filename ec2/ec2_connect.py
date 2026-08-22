@@ -26,20 +26,12 @@ TARGET_NAMES = [
 
 
 def aws_sso_login(profile):
-    """
-    Perform AWS SSO login for the specified profile.
-    Always runs 'aws sso login --profile <profile>'.
-    """
     print(f"Authenticating with AWS SSO (profile: {profile})...")
-    print("This will open a browser window for authentication.\n")
-
     try:
         subprocess.run(
             ['aws', 'sso', 'login', '--profile', profile],
             check=True
         )
-        print(f"\nSuccessfully authenticated with profile: {profile}")
-        return True
     except subprocess.CalledProcessError as e:
         print(f"\nError: Failed to authenticate with AWS SSO: {e}")
         sys.exit(1)
