@@ -3,6 +3,25 @@ import argparse
 import qrcode
 from PIL import Image, ImageDraw, ImageFont
 
+# Candidate TTF fonts with full accent/unicode coverage. PIL's load_default() font
+# (Aileron) has a limited glyph set and renders accented characters as boxes.
+_FONT_CANDIDATES = [
+    "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",  # macOS
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",  # Linux (dejavu-fonts)
+    "/usr/share/fonts/TTF/DejaVuSans.ttf",  # Linux (some distros)
+    "C:\\Windows\\Fonts\\arial.ttf",  # Windows
+]
+
+
+def load_font(size):
+    for path in _FONT_CANDIDATES:
+        try:
+            return ImageFont.truetype(path, size)
+        except OSError:
+            continue
+    return ImageFont.load_default(size=size)
+
+
 parser = argparse.ArgumentParser(description="Generate a QR code, optionally with a center logo and caption text.")
 parser.add_argument("url", help="URL (or any text) to encode")
 parser.add_argument("-o", "--output", default="qr_code.png", help="output file path (default: qr_code.png)")
@@ -47,7 +66,7 @@ if args.text:
     # Shrink font until text (plus padding) fits within max_box_size.
     font_size = 28
     while font_size > 8:
-        font = ImageFont.load_default(size=font_size)
+        font = load_font(font_size)
         draw = ImageDraw.Draw(img)
         text_bbox = draw.textbbox((0, 0), args.text, font=font)
         text_w, text_h = text_bbox[2] - text_bbox[0], text_bbox[3] - text_bbox[1]
